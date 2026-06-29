@@ -11,90 +11,167 @@
       box-sizing: border-box;
     }
     body {
-      background-color: #111;
+      background-color: #1a1a1a;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       min-height: 100vh;
-      font-family: system-ui, sans-serif;
-      color: #fff;
+      font-family: Arial, sans-serif;
+      color: #ffffff;
+      touch-action: none;
     }
     #score {
       font-size: 24px;
       margin-bottom: 12px;
       letter-spacing: 1px;
     }
-    canvas {
+    #gameCanvas {
       display: block;
-      background-color: #1a1a1a;
-      border: 2px solid #333;
+      background-color: #111111;
+      border: 2px solid #333333;
+    }
+    #overlay {
+      display: none;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.82);
+      border: 2px solid #444;
+      border-radius: 10px;
+      padding: 32px 40px;
+      text-align: center;
+      z-index: 10;
+    }
+    #overlay h2 {
+      font-size: 32px;
+      margin-bottom: 12px;
+      color: #ff4444;
+    }
+    #overlay p {
+      font-size: 20px;
+      margin-bottom: 24px;
+      color: #ffffff;
+    }
+    #restartBtn {
+      background-color: #4caf50;
+      color: #fff;
+      border: none;
+      padding: 12px 32px;
+      font-size: 18px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #restartBtn:hover {
+      background-color: #45a049;
+    }
+    #wrapper {
+      position: relative;
     }
   </style>
 </head>
 <body>
   <div id="score">Score: 0</div>
-  <canvas id="gameCanvas" width="400" height="400"></canvas>
+  <div id="wrapper">
+    <canvas id="gameCanvas" width="400" height="400"></canvas>
+    <div id="overlay">
+      <h2>Game Over</h2>
+      <p id="finalScore">Score: 0</p>
+      <button id="restartBtn">Restart</button>
+    </div>
+  </div>
 
   <script>
     const CANVAS_SIZE = 400;
     const CELL_SIZE = 20;
-    const COLS = CANVAS_SIZE / CELL_SIZE;
-    const ROWS = CANVAS_SIZE / CELL_SIZE;
+    const COLS = CANVAS_SIZE / CELL_SIZE; // 20
+    const ROWS = CANVAS_SIZE / CELL_SIZE; // 20
     const FPS = 10;
+    const INTERVAL_MS = 1000 / FPS;
+    const GRACE_PERIOD_MS = 2000;
 
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const scoreEl = document.getElementById('score');
+    const overlay = document.getElementById('overlay');
+    const finalScoreEl = document.getElementById('finalScore');
+    const restartBtn = document.getElementById('restartBtn');
 
-    let snake, dir, nextDir, food, score, gameOver, intervalId;
+    let snake, direction, nextDirection, food, score, gameInterval, gameRunning;
+    let graceStart;
 
     function initGame() {
-      const startX = 10;
-      const startY = 10;
-      snake = [];
-      for (let i = 4; i >= 0; i--) {
-        snake.push({ x: startX - i, y: startY });
-      }
-      dir = { x: 1, y: 0 };
-      nextDir = { x: 1, y: 0 };
+      // Start snake with head at x:6, y:10 moving right, tail at x:2
+      snake = [
+        { x: 2, y: 10 },
+        { x: 3, y: 10 },
+        { x: 4, y: 10 },
+        { x: 5, y: 10 },
+        { x: 6, y: 10 }
+      ];
+      direction = { x: 1, y: 0 };
+      nextDirection = { x: 1, y: 0 };
       score = 0;
-      gameOver = false;
       scoreEl.textContent = 'Score: 0';
+      overlay.style.display = 'none';
+      graceStart = Date.now();
       spawnFood();
+      gameRunning = true;
+      if (gameInterval) clearInterval(gameInterval);
+      gameInterval = setInterval(gameStep, INTERVAL_MS);
     }
 
     function spawnFood() {
       let pos;
+      let attempts = 0;
       do {
         pos = {
           x: Math.floor(Math.random() * COLS),
           y: Math.floor(Math.random() * ROWS)
         };
-      } while (snake.some(seg => seg.x === pos.x && seg.y === pos.y));
+        attempts++;
+      } while (attempts < 400 && snake.some(s => s.x === pos.x && s.y === pos.y));
       food = pos;
     }
 
-    function update() {
-      if (gameOver) return;
+    function gameStep() {
+      if (!gameRunning) return;
 
-      dir = { x: nextDir.x, y: nextDir.y };
+      direction = { x: nextDirection.x, y: nextDirection.y };
 
       const head = snake[snake.length - 1];
-      const newHead = { x: head.x + dir.x, y: head.y + dir.y };
+      const newHead = {
+        x: head.x + direction.x,
+        y: head.y + direction.y
+      };
 
-      if (newHead.x < 0 || newHead.x >= COLS || newHead.y < 0 || newHead.y >= ROWS) {
-        endGame();
-        return;
-      }
+      const inGrace = (Date.now() - graceStart) < GRACE_PERIOD_MS;
 
-      if (snake.some(seg => seg.x === newHead.x && seg.y === newHead.y)) {
-        endGame();
-        return;
+      if (inGrace) {
+        // Wrap instead of ending game on wall collision
+        if (newHead.x < 0) newHead.x = COLS - 1;
+        if (newHead.x >= COLS) newHead.x = 0;
+        if (newHead.y < 0) newHead.y = ROWS - 1;
+        if (newHead.y >= ROWS) newHead.y = 0;
+        // Self-collision is also suppressed during grace period
+      } else {
+        // Wall collision
+        if (newHead.x < 0 || newHead.x >= COLS || newHead.y < 0 || newHead.y >= ROWS) {
+          endGame();
+          return;
+        }
+
+        // Self collision
+        if (snake.some(s => s.x === newHead.x && s.y === newHead.y)) {
+          endGame();
+          return;
+        }
       }
 
       snake.push(newHead);
 
+      // Food collision
       if (newHead.x === food.x && newHead.y === food.y) {
         score++;
         scoreEl.textContent = 'Score: ' + score;
@@ -102,159 +179,108 @@
       } else {
         snake.shift();
       }
+
+      draw();
     }
 
     function draw() {
-      ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      ctx.fillStyle = '#111111';
+      ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
-      ctx.fillStyle = '#00cc44';
+      // Draw food
+      ctx.fillStyle = '#e53935';
+      ctx.fillRect(
+        food.x * CELL_SIZE + 1,
+        food.y * CELL_SIZE + 1,
+        CELL_SIZE - 2,
+        CELL_SIZE - 2
+      );
+
+      // Draw snake
+      ctx.fillStyle = '#4caf50';
       for (const seg of snake) {
-        ctx.fillRect(seg.x * CELL_SIZE + 1, seg.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+        ctx.fillRect(
+          seg.x * CELL_SIZE + 1,
+          seg.y * CELL_SIZE + 1,
+          CELL_SIZE - 2,
+          CELL_SIZE - 2
+        );
       }
-
-      ctx.fillStyle = '#ff3333';
-      ctx.fillRect(food.x * CELL_SIZE + 1, food.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
-
-      if (gameOver) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 36px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Game Over', CANVAS_SIZE / 2, 155);
-
-        ctx.font = '22px system-ui, sans-serif';
-        ctx.fillText('Score: ' + score, CANVAS_SIZE / 2, 200);
-
-        const btnX = CANVAS_SIZE / 2 - 70;
-        const btnY = 230;
-        const btnW = 140;
-        const btnH = 44;
-
-        ctx.fillStyle = '#00cc44';
-        ctx.beginPath();
-        ctx.roundRect(btnX, btnY, btnW, btnH, 8);
-        ctx.fill();
-
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 20px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Restart', CANVAS_SIZE / 2, btnY + 29);
-      }
-    }
-
-    function loop() {
-      update();
-      draw();
     }
 
     function endGame() {
-      gameOver = true;
-      draw();
+      gameRunning = false;
+      clearInterval(gameInterval);
+      finalScoreEl.textContent = 'Score: ' + score;
+      overlay.style.display = 'block';
     }
 
-    function startLoop() {
-      if (intervalId) clearInterval(intervalId);
-      intervalId = setInterval(loop, 1000 / FPS);
-    }
-
-    function restart() {
-      initGame();
-      startLoop();
-    }
-
+    // Keyboard controls
     document.addEventListener('keydown', function(e) {
       switch (e.key) {
         case 'ArrowUp':
-          if (dir.y !== 1) nextDir = { x: 0, y: -1 };
+          if (direction.y !== 1) nextDirection = { x: 0, y: -1 };
           e.preventDefault();
           break;
         case 'ArrowDown':
-          if (dir.y !== -1) nextDir = { x: 0, y: 1 };
+          if (direction.y !== -1) nextDirection = { x: 0, y: 1 };
           e.preventDefault();
           break;
         case 'ArrowLeft':
-          if (dir.x !== 1) nextDir = { x: -1, y: 0 };
+          if (direction.x !== 1) nextDirection = { x: -1, y: 0 };
           e.preventDefault();
           break;
         case 'ArrowRight':
-          if (dir.x !== -1) nextDir = { x: 1, y: 0 };
+          if (direction.x !== -1) nextDirection = { x: 1, y: 0 };
           e.preventDefault();
           break;
       }
     });
 
+    // Touch / swipe controls
     let touchStartX = 0;
     let touchStartY = 0;
-    const SWIPE_THRESHOLD = 30;
+    const SWIPE_THRESHOLD = 20;
 
     canvas.addEventListener('touchstart', function(e) {
-      e.preventDefault();
-      const touch = e.changedTouches[0];
-      touchStartX = touch.clientX;
-      touchStartY = touch.clientY;
-    }, { passive: false });
+      const t = e.touches[0];
+      touchStartX = t.clientX;
+      touchStartY = t.clientY;
+    }, { passive: true });
 
     canvas.addEventListener('touchend', function(e) {
-      e.preventDefault();
-      const touch = e.changedTouches[0];
-      const dx = touch.clientX - touchStartX;
-      const dy = touch.clientY - touchStartY;
-
-      if (gameOver) {
-        const rect = canvas.getBoundingClientRect();
-        const tapX = touch.clientX - rect.left;
-        const tapY = touch.clientY - rect.top;
-        const scaleX = CANVAS_SIZE / rect.width;
-        const scaleY = CANVAS_SIZE / rect.height;
-        const cx = tapX * scaleX;
-        const cy = tapY * scaleY;
-        const btnX = CANVAS_SIZE / 2 - 70;
-        const btnY = 230;
-        const btnW = 140;
-        const btnH = 44;
-        if (cx >= btnX && cx <= btnX + btnW && cy >= btnY && cy <= btnY + btnH) {
-          restart();
-        }
-        return;
-      }
+      const t = e.changedTouches[0];
+      const dx = t.clientX - touchStartX;
+      const dy = t.clientY - touchStartY;
 
       if (Math.abs(dx) < SWIPE_THRESHOLD && Math.abs(dy) < SWIPE_THRESHOLD) return;
 
       if (Math.abs(dx) > Math.abs(dy)) {
+        // Horizontal swipe
         if (dx > 0) {
-          if (dir.x !== -1) nextDir = { x: 1, y: 0 };
+          if (direction.x !== -1) nextDirection = { x: 1, y: 0 };
         } else {
-          if (dir.x !== 1) nextDir = { x: -1, y: 0 };
+          if (direction.x !== 1) nextDirection = { x: -1, y: 0 };
         }
       } else {
+        // Vertical swipe
         if (dy > 0) {
-          if (dir.y !== -1) nextDir = { x: 0, y: 1 };
+          if (direction.y !== -1) nextDirection = { x: 0, y: 1 };
         } else {
-          if (dir.y !== 1) nextDir = { x: 0, y: -1 };
+          if (direction.y !== 1) nextDirection = { x: 0, y: -1 };
         }
       }
-    }, { passive: false });
+    }, { passive: true });
 
-    canvas.addEventListener('click', function(e) {
-      if (!gameOver) return;
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = CANVAS_SIZE / rect.width;
-      const scaleY = CANVAS_SIZE / rect.height;
-      const cx = (e.clientX - rect.left) * scaleX;
-      const cy = (e.clientY - rect.top) * scaleY;
-      const btnX = CANVAS_SIZE / 2 - 70;
-      const btnY = 230;
-      const btnW = 140;
-      const btnH = 44;
-      if (cx >= btnX && cx <= btnX + btnW && cy >= btnY && cy <= btnY + btnH) {
-        restart();
-      }
+    restartBtn.addEventListener('click', initGame);
+    restartBtn.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      initGame();
     });
 
+    // Start immediately
     initGame();
-    startLoop();
+    draw();
   </script>
 </body>
 </html>
